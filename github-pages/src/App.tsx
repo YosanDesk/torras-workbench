@@ -15,12 +15,15 @@ const SUPABASE_TABLE = "torras_dashboard_state";
 const REMOTE_STATE_ID = "main";
 const EDIT_SESSION_KEY = "torras-edit-session-expires";
 const LOCAL_STATE_KEY = "torras-workbench-offline-state-v1";
+const LOCAL_DIRTY_KEY = "torras-workbench-offline-dirty-v1";
 const EDIT_PASSWORD = "0702";
 const remoteHeaders = (extra: Record<string, string> = {}) => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra });
 const readLocalState = (): AppData | null => {
   try { const raw = window.localStorage.getItem(LOCAL_STATE_KEY); return raw ? JSON.parse(raw) as AppData : null; } catch { return null; }
 };
 const writeLocalState = (data: AppData) => { try { window.localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(data)); } catch {} };
+const hasLocalEdits = () => { try { return window.localStorage.getItem(LOCAL_DIRTY_KEY) === "1"; } catch { return false; } };
+const setLocalEdits = (value: boolean) => { try { value ? window.localStorage.setItem(LOCAL_DIRTY_KEY, "1") : window.localStorage.removeItem(LOCAL_DIRTY_KEY); } catch {} };
 
 const fallback: AppData = {
   week: { capacity: 0, start: "2026-08-31", end: "2026-09-06" },
@@ -88,6 +91,8 @@ export default function Home() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setSaveState("loading");
     try {
+      const cachedBeforeLoad = readLocalState();
+      if (hasLocalEdits() && cachedBeforeLoad) { setData(cachedBeforeLoad); setSaveState("saved"); setReady(true); return; }
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
       if (!response.ok) throw new Error("读取共享数据失败");
       const rows = await response.json() as Array<{ data?: Record<string, unknown> }>;
@@ -121,6 +126,7 @@ export default function Home() {
     writeLocalState(data);
     if (remoteHydration.current) { remoteHydration.current = false; skipFirstSave.current = false; return; }
     if (skipFirstSave.current) { skipFirstSave.current = false; return; }
+    setLocalEdits(true);
     setSaveState("saving"); savingRef.current = true;
     const timer = window.setTimeout(async () => {
       let lastError: unknown;
@@ -132,7 +138,7 @@ export default function Home() {
           const mergedData = { ...(latestRows[0]?.data || {}), torrasWorkbench: data };
           const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
           if (!response.ok) throw new Error(`保存失败（${response.status}）`);
-          setSaveState("saved"); savingRef.current = false; return;
+          setLocalEdits(false); setSaveState("saved"); savingRef.current = false; return;
         } catch (error) { lastError = error; await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1))); }
       }
       savingRef.current = false; setSaveState("error"); showToast("error", lastError instanceof Error ? lastError.message : "保存失败，请重试");
