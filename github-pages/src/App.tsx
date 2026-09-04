@@ -14,8 +14,13 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SUPABASE_TABLE = "torras_dashboard_state";
 const REMOTE_STATE_ID = "main";
 const EDIT_SESSION_KEY = "torras-edit-session-expires";
+const LOCAL_STATE_KEY = "torras-workbench-offline-state-v1";
 const EDIT_PASSWORD = "0702";
 const remoteHeaders = (extra: Record<string, string> = {}) => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra });
+const readLocalState = (): AppData | null => {
+  try { const raw = window.localStorage.getItem(LOCAL_STATE_KEY); return raw ? JSON.parse(raw) as AppData : null; } catch { return null; }
+};
+const writeLocalState = (data: AppData) => { try { window.localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(data)); } catch {} };
 
 const fallback: AppData = {
   week: { capacity: 0, start: "2026-08-31", end: "2026-09-06" },
@@ -86,29 +91,34 @@ export default function Home() {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
       if (!response.ok) throw new Error("读取共享数据失败");
       const rows = await response.json() as Array<{ data?: Record<string, unknown> }>;
-      const incoming = (rows[0]?.data?.torrasWorkbench || fallback) as Partial<AppData>;
+      const incoming = (rows[0]?.data?.torrasWorkbench || readLocalState() || fallback) as Partial<AppData>;
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
       remoteHydration.current = true;
-      setData({
+      const nextData = {
         week: loadedWeek,
         products: Array.isArray(incoming.products) ? incoming.products : fallback.products,
         requests: Array.isArray(incoming.requests) && incoming.requests.every((item) => "deliveryType" in item) ? incoming.requests : [],
         ideas: Array.isArray(incoming.ideas) ? incoming.ideas : [],
         weekHistory: loadedHistory,
         activeWeekId: normalizeLegacyWeekStart(incoming.activeWeekId || incoming.week?.start || fallback.activeWeekId || fallback.week.start),
-      });
+      };
+      setData(nextData); writeLocalState(nextData);
       setSaveState("saved"); setReady(true);
     } catch (error) {
-      setSaveState("error"); setReady(true);
-      if (!silent) showToast("error", error instanceof Error ? error.message : "共享数据加载失败");
+      const cached = readLocalState();
+      if (cached) { setData(cached); setSaveState("saved"); }
+      else setSaveState("error");
+      setReady(true);
+      if (!silent && !cached) showToast("error", error instanceof Error ? error.message : "共享数据加载失败");
     }
   }, [showToast]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!ready) return;
+    writeLocalState(data);
     if (remoteHydration.current) { remoteHydration.current = false; skipFirstSave.current = false; return; }
     if (skipFirstSave.current) { skipFirstSave.current = false; return; }
     setSaveState("saving"); savingRef.current = true;
