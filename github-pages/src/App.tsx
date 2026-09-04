@@ -12,7 +12,7 @@ type SaveState = "loading" | "saved" | "saving" | "error";
 const SUPABASE_URL = "https://phklgazjbpotnyvvtxff.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoa2xnYXpqYnBvdG55dnZ0eGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzcxNzQsImV4cCI6MjEwMjk1MzE3NH0.mLOUEyemAgT0zWWyMDdS37UkQAbqqD3F1zwvHMH4rx4";
 const SUPABASE_TABLE = "torras_dashboard_state";
-const REMOTE_STATE_ID = "torras-workbench";
+const REMOTE_STATE_ID = "main";
 const EDIT_SESSION_KEY = "torras-edit-session-expires";
 const EDIT_PASSWORD = "0702";
 const remoteHeaders = (extra: Record<string, string> = {}) => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra });
@@ -85,8 +85,8 @@ export default function Home() {
     try {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
       if (!response.ok) throw new Error("读取共享数据失败");
-      const rows = await response.json() as Array<{ data?: AppData }>;
-      const incoming = (rows[0]?.data || fallback) as Partial<AppData>;
+      const rows = await response.json() as Array<{ data?: Record<string, unknown> }>;
+      const incoming = (rows[0]?.data?.torrasWorkbench || fallback) as Partial<AppData>;
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
@@ -116,7 +116,11 @@ export default function Home() {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data }) });
+          const latest = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
+          if (!latest.ok) throw new Error("读取最新共享数据失败");
+          const latestRows = await latest.json() as Array<{ data?: Record<string, unknown> }>;
+          const mergedData = { ...(latestRows[0]?.data || {}), torrasWorkbench: data };
+          const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
           if (!response.ok) throw new Error(`保存失败（${response.status}）`);
           setSaveState("saved"); savingRef.current = false; return;
         } catch (error) { lastError = error; await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1))); }
