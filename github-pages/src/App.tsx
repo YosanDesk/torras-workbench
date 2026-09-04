@@ -119,7 +119,7 @@ export default function Home() {
           const latest = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
           if (!latest.ok) throw new Error("读取最新共享数据失败");
           const latestRows = await latest.json() as Array<{ data?: Record<string, unknown> }>;
-          const mergedData = { ...(latestRows[0]?.data || {}), ...data };
+          const mergedData = { ...(latestRows[0]?.data || {}), torrasWorkbench: data };
           const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
           if (!response.ok) throw new Error(`保存失败（${response.status}）`);
           setSaveState("saved"); savingRef.current = false; return;
