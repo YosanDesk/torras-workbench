@@ -131,9 +131,9 @@ export default function Home() {
   }, [data, ready, showToast]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => { if (!savingRef.current) void load(true); }, 8000);
+    const timer = window.setInterval(() => { if (!savingRef.current && !isEditing) void load(true); }, 8000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, isEditing]);
 
   const enterEditMode = () => {
     const expiresAt = Number(window.localStorage.getItem(EDIT_SESSION_KEY) || 0);
