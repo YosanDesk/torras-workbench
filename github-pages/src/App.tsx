@@ -12,7 +12,7 @@ type SaveState = "loading" | "saved" | "saving" | "error";
 const SUPABASE_URL = "https://phklgazjbpotnyvvtxff.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoa2xnYXpqYnBvdG55dnZ0eGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzcxNzQsImV4cCI6MjEwMjk1MzE3NH0.mLOUEyemAgT0zWWyMDdS37UkQAbqqD3F1zwvHMH4rx4";
 const SUPABASE_TABLE = "torras_dashboard_state";
-const REMOTE_STATE_ID = "main";
+const REMOTE_STATE_ID = "torras-workbench";
 const EDIT_SESSION_KEY = "torras-edit-session-expires";
 const EDIT_PASSWORD = "0702";
 const remoteHeaders = (extra: Record<string, string> = {}) => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra });
