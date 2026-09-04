@@ -4,7 +4,7 @@ type Tab = "progress" | "requests" | "ideas";
 type Week = { capacity: number; start: string; end: string };
 type Product = { id: string; name: string; videoTarget: number; videoDone: number; imageTarget: number; imageDone: number; note?: string };
 type WorkRequest = { id: string; name: string; product: string; deliveryType: string; feishuLink: string; quantity: number; dueDate: string; priority: string; submitter: string; notes: string; status: "待确认" | "制作中" | "已完成"; createdAt: string };
-type Idea = { id: string; title: string; copy: string; referenceLink: string; story: string; category: "文案" | "视频" | "用户故事" | "其他"; recorder: string; date?: string; accepted: boolean; createdAt: string };
+type Idea = { id: string; title: string; copy: string; referenceLink: string; image?: string; story: string; category: "文案" | "视频" | "用户故事" | "其他"; recorder: string; date?: string; accepted: boolean; createdAt: string };
 type WeekRecord = Week & { id: string; products: Product[] };
 type AppData = { week: Week; products: Product[]; requests: WorkRequest[]; ideas: Idea[]; weekHistory?: WeekRecord[]; activeWeekId?: string };
 type SaveState = "loading" | "saved" | "saving" | "error";
@@ -14,16 +14,8 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SUPABASE_TABLE = "torras_dashboard_state";
 const REMOTE_STATE_ID = "main";
 const EDIT_SESSION_KEY = "torras-edit-session-expires";
-const LOCAL_STATE_KEY = "torras-workbench-offline-state-v1";
-const LOCAL_DIRTY_KEY = "torras-workbench-offline-dirty-v1";
 const EDIT_PASSWORD = "0702";
 const remoteHeaders = (extra: Record<string, string> = {}) => ({ apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra });
-const readLocalState = (): AppData | null => {
-  try { const raw = window.localStorage.getItem(LOCAL_STATE_KEY); return raw ? JSON.parse(raw) as AppData : null; } catch { return null; }
-};
-const writeLocalState = (data: AppData) => { try { window.localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(data)); } catch {} };
-const hasLocalEdits = () => { try { return window.localStorage.getItem(LOCAL_DIRTY_KEY) === "1"; } catch { return false; } };
-const setLocalEdits = (value: boolean) => { try { value ? window.localStorage.setItem(LOCAL_DIRTY_KEY, "1") : window.localStorage.removeItem(LOCAL_DIRTY_KEY); } catch {} };
 
 const fallback: AppData = {
   week: { capacity: 0, start: "2026-08-31", end: "2026-09-06" },
@@ -48,7 +40,7 @@ const normalizeLegacyWeekStart = (start: string) => {
   if (offset >= 0 && offset <= 119 && offset % 7 === 0) { value.setDate(value.getDate() + 1); return localDateValue(value); }
   return start;
 };
-const emptyIdea = { title: "", copy: "", referenceLink: "", story: "", category: "文案" as const, recorder: "", date: localDateValue(new Date()) };
+const emptyIdea = { title: "", copy: "", referenceLink: "", image: "", story: "", category: "文案" as const, recorder: "", date: localDateValue(new Date()) };
 const ideaDateLabel = (idea: Idea) => new Date(`${idea.date || idea.createdAt.slice(0, 10)}T00:00:00`).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 const weeklyPeriods = Array.from({ length: 17 }, (_, index) => {
   const date = new Date("2026-08-31T00:00:00"); date.setDate(date.getDate() + index * 7);
@@ -91,42 +83,34 @@ export default function Home() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setSaveState("loading");
     try {
-      const cachedBeforeLoad = readLocalState();
-      if (hasLocalEdits() && cachedBeforeLoad) { setData(cachedBeforeLoad); setSaveState("saved"); setReady(true); return; }
       const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
       if (!response.ok) throw new Error("读取共享数据失败");
-      const rows = await response.json() as Array<{ data?: Record<string, unknown> }>;
-      const incoming = (rows[0]?.data?.torrasWorkbench || readLocalState() || fallback) as Partial<AppData>;
+      const rows = await response.json() as Array<{ data?: AppData }>;
+      const incoming = (rows[0]?.data || fallback) as Partial<AppData>;
       const loadedWeek = { ...fallback.week, ...(incoming.week || {}) };
       loadedWeek.start = normalizeLegacyWeekStart(loadedWeek.start);
       const loadedHistory = Array.isArray(incoming.weekHistory) ? incoming.weekHistory.map((item) => { const start = normalizeLegacyWeekStart(item.start); return start === item.start ? item : { ...item, id: start, start }; }) : [];
       remoteHydration.current = true;
-      const nextData = {
+      setData({
         week: loadedWeek,
         products: Array.isArray(incoming.products) ? incoming.products : fallback.products,
         requests: Array.isArray(incoming.requests) && incoming.requests.every((item) => "deliveryType" in item) ? incoming.requests : [],
         ideas: Array.isArray(incoming.ideas) ? incoming.ideas : [],
         weekHistory: loadedHistory,
         activeWeekId: normalizeLegacyWeekStart(incoming.activeWeekId || incoming.week?.start || fallback.activeWeekId || fallback.week.start),
-      };
-      setData(nextData); writeLocalState(nextData);
+      });
       setSaveState("saved"); setReady(true);
     } catch (error) {
-      const cached = readLocalState();
-      if (cached) { setData(cached); setSaveState("saved"); }
-      else setSaveState("error");
-      setReady(true);
-      if (!silent && !cached) showToast("error", error instanceof Error ? error.message : "共享数据加载失败");
+      setSaveState("error"); setReady(true);
+      if (!silent) showToast("error", error instanceof Error ? error.message : "共享数据加载失败");
     }
   }, [showToast]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!ready) return;
-    writeLocalState(data);
     if (remoteHydration.current) { remoteHydration.current = false; skipFirstSave.current = false; return; }
     if (skipFirstSave.current) { skipFirstSave.current = false; return; }
-    setLocalEdits(true);
     setSaveState("saving"); savingRef.current = true;
     const timer = window.setTimeout(async () => {
       let lastError: unknown;
@@ -135,10 +119,10 @@ export default function Home() {
           const latest = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${REMOTE_STATE_ID}&select=data`, { headers: remoteHeaders(), cache: "no-store" });
           if (!latest.ok) throw new Error("读取最新共享数据失败");
           const latestRows = await latest.json() as Array<{ data?: Record<string, unknown> }>;
-          const mergedData = { ...(latestRows[0]?.data || {}), torrasWorkbench: data };
+          const mergedData = { ...(latestRows[0]?.data || {}), ...data };
           const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, { method: "POST", headers: remoteHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ id: REMOTE_STATE_ID, data: mergedData }) });
           if (!response.ok) throw new Error(`保存失败（${response.status}）`);
-          setLocalEdits(false); setSaveState("saved"); savingRef.current = false; return;
+          setSaveState("saved"); savingRef.current = false; return;
         } catch (error) { lastError = error; await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1))); }
       }
       savingRef.current = false; setSaveState("error"); showToast("error", lastError instanceof Error ? lastError.message : "保存失败，请重试");
@@ -274,7 +258,7 @@ function RequestsView({ editable, requests, onNew, onStatus, onDelete }: { edita
   return <section className="requests-section"><div className="page-intro"><div><span className="section-index">REQUEST INTAKE</span><h2>集中接收拍摄需求</h2><p>为了方便排期，需要至少提前一周提交需求。</p></div><button type="button" disabled={!editable} className="primary-button" onClick={onNew}>＋ 提交新需求</button></div><div className="request-stats"><Summary label="全部需求" value={requests.length} unit="条" /><Summary label="待确认" value={requests.filter((x) => x.status === "待确认").length} unit="条" /><Summary label="制作中" value={requests.filter((x) => x.status === "制作中").length} unit="条" /><Summary label="已完成" value={requests.filter((x) => x.status === "已完成").length} unit="条" /></div>{requests.length === 0 ? <Empty disabled={!editable} icon="02" title="暂无拍摄需求" text="运营和其他同事提交的需求会在这里统一流转。" action="提交第一条需求" onAction={onNew} /> : <div className="request-list">{requests.map((item) => <article className="request-card" key={item.id}><div className="request-top"><div className="request-title"><span className={`priority ${item.priority}`}>{item.priority}</span><h3>{item.name}</h3></div><div className="request-actions"><select disabled={!editable} aria-label={`${item.name}状态`} value={item.status} onChange={(e) => onStatus(item.id, e.target.value as WorkRequest["status"])}><option>待确认</option><option>制作中</option><option>已完成</option></select><button disabled={!editable} className="request-delete" aria-label={`删除需求：${item.name}`} onClick={() => { if (window.confirm(`确定删除需求“${item.name}”吗？删除后无法恢复。`)) onDelete(item.id); }}>删除</button></div></div><div className="request-meta"><span>产品<b>{item.product}</b></span><span>交付<b>{item.deliveryType} × {item.quantity}</b></span><span>截止<b>{item.dueDate}</b></span><span>提交人<b>{item.submitter}</b></span></div>{item.notes && <p>{item.notes}</p>}<footer><time>{new Date(item.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 提交</time>{item.feishuLink ? <a href={item.feishuLink} target="_blank" rel="noreferrer">打开飞书需求 ↗</a> : <span>无飞书链接</span>}</footer></article>)}</div>}</section>;
 }
 
-function IdeasView({ editable, ideas, acceptedCount, onNew, onToggle, onDelete }: { editable: boolean; ideas: Idea[]; acceptedCount: number; onNew: () => void; onToggle: (id: string) => void; onDelete: (id: string) => void }) { return <section className="ideas-section"><div className="page-intro"><div><span className="section-index">IDEA COLLECTION</span><h2>把日区观察变成内容</h2><p>按最新时间沉淀文案、视频和真实用户故事。</p></div><button disabled={!editable} className="primary-button" onClick={onNew}>＋ 记录新灵感</button></div><div className="idea-summary"><div><span>灵感总数</span><b>{ideas.length}</b></div><div><span>已采纳</span><b>{acceptedCount}</b></div><p>采纳率 <strong>{ideas.length ? Math.round(acceptedCount / ideas.length * 100) : 0}%</strong></p></div>{ideas.length === 0 ? <Empty disabled={!editable} icon="✦" title="还没有灵感便签" text="记录第一条日区文案、视频或用户故事。" action="记录新灵感" onAction={onNew} /> : <div className="idea-grid">{ideas.map((idea, index) => <article className={`idea-card tone-${index % 3}`} key={idea.id}><div className="idea-card-head"><span>{idea.category}</span><time>{ideaDateLabel(idea)}</time></div>{idea.copy && <div><small>日区文案</small><p>{idea.copy}</p></div>}{idea.story && <div><small>用户与手机壳的故事</small><p>{idea.story}</p></div>}<footer><div><b>{idea.recorder}</b>{idea.referenceLink && <a href={idea.referenceLink} target="_blank" rel="noreferrer">参考视频 ↗</a>}</div><span className="idea-actions"><button disabled={!editable} className="idea-delete" onClick={() => { if (window.confirm(`确定删除灵感“${idea.title}”吗？删除后无法恢复。`)) onDelete(idea.id); }}>删除</button><button disabled={!editable} className={idea.accepted ? "accepted" : "accept"} onClick={() => onToggle(idea.id)}>{idea.accepted ? "✓ 已采纳" : "采纳"}</button></span></footer></article>)}</div>}</section>; }
+function IdeasView({ editable, ideas, acceptedCount, onNew, onToggle, onDelete }: { editable: boolean; ideas: Idea[]; acceptedCount: number; onNew: () => void; onToggle: (id: string) => void; onDelete: (id: string) => void }) { return <section className="ideas-section"><div className="page-intro"><div><span className="section-index">IDEA COLLECTION</span><h2>把日区观察变成内容</h2><p>按最新时间沉淀文案、视频和真实用户故事。</p></div><button disabled={!editable} className="primary-button" onClick={onNew}>＋ 记录新灵感</button></div><div className="idea-summary"><div><span>灵感总数</span><b>{ideas.length}</b></div><div><span>已采纳</span><b>{acceptedCount}</b></div><p>采纳率 <strong>{ideas.length ? Math.round(acceptedCount / ideas.length * 100) : 0}%</strong></p></div>{ideas.length === 0 ? <Empty disabled={!editable} icon="✦" title="还没有灵感便签" text="记录第一条日区文案、视频或用户故事。" action="记录新灵感" onAction={onNew} /> : <div className="idea-grid">{ideas.map((idea, index) => <article className={`idea-card tone-${index % 3}`} key={idea.id}><div className="idea-card-head"><span>{idea.category}</span><time>{ideaDateLabel(idea)}</time></div>{idea.image && <div className="idea-image-wrap"><small>参考图片</small><img className="idea-image" src={idea.image} alt="灵感参考图片" /></div>}{idea.copy && <div><small>日区文案</small><p>{idea.copy}</p></div>}{idea.story && <div><small>用户与手机壳的故事</small><p>{idea.story}</p></div>}<footer><div><b>{idea.recorder}</b>{idea.referenceLink && <a href={idea.referenceLink} target="_blank" rel="noreferrer">参考视频 ↗</a>}</div><span className="idea-actions"><button disabled={!editable} className="idea-delete" onClick={() => { if (window.confirm(`确定删除灵感“${idea.title}”吗？删除后无法恢复。`)) onDelete(idea.id); }}>删除</button><button disabled={!editable} className={idea.accepted ? "accepted" : "accept"} onClick={() => onToggle(idea.id)}>{idea.accepted ? "✓ 已采纳" : "采纳"}</button></span></footer></article>)}</div>}</section>; }
 
 function MangaScene({ variant }: { variant: Tab }) {
   return <div className={`manga-scene ${variant}`} aria-hidden="true"><span className="manga-panel" /><span className="manga-horizon" /><span className="manga-sun" /><span className="manga-speed one" /><span className="manga-speed two" /><span className="manga-person"><i className="manga-hair" /><i className="manga-eye" /><i className="manga-body" /></span><span className="manga-prop"><i /><b /></span><span className="manga-spark one" /><span className="manga-spark two" /></div>;
@@ -283,6 +267,6 @@ function MangaScene({ variant }: { variant: Tab }) {
 function Modal({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.currentTarget === e.target) onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-label={title}><header><div><span className="section-index">NEW ENTRY</span><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose} aria-label="关闭">×</button></header>{children}</div></div>; }
 function Field({ label, required, children, wide }: { label: string; required?: boolean; children: React.ReactNode; wide?: boolean }) { return <label className={wide ? "field wide" : "field"}><span>{label}{required && <i>*</i>}</span>{children}</label>; }
 function RequestForm({ value, setValue, onSubmit, onCancel }: { value: typeof emptyRequest; setValue: React.Dispatch<React.SetStateAction<typeof emptyRequest>>; onSubmit: (e: React.FormEvent) => void; onCancel: () => void }) { return <form className="form-grid" onSubmit={onSubmit}><Field label="产品" required><select required value={value.product} onChange={(e) => setValue({ ...value, product: e.target.value })}><option value="" disabled>请选择产品</option><option>Q3 air</option><option>Air pro</option><option>皮革</option><option>O3 air</option><option>Hue</option><option>其他</option></select></Field><Field label="交付类型"><select value={value.deliveryType} onChange={(e) => setValue({ ...value, deliveryType: e.target.value })}><option>视频</option><option>图片</option><option>视频 + 图片</option></select></Field><Field label="飞书需求链接" wide><input type="url" value={value.feishuLink} onChange={(e) => setValue({ ...value, feishuLink: e.target.value })} placeholder="https://..." /></Field><Field label="数量"><input type="number" min="1" value={value.quantity} onChange={(e) => setValue({ ...value, quantity: Math.max(1, safeNumber(e.target.value)) })} /></Field><Field label="截止日期" required><input type="date" value={value.dueDate} onChange={(e) => setValue({ ...value, dueDate: e.target.value })} /></Field><Field label="优先级"><select value={value.priority} onChange={(e) => setValue({ ...value, priority: e.target.value })}><option>普通</option><option>优先</option><option>紧急</option></select></Field><Field label="提交人" required><input value={value.submitter} onChange={(e) => setValue({ ...value, submitter: e.target.value })} placeholder="姓名" /></Field><Field label="补充说明" wide><textarea value={value.notes} onChange={(e) => setValue({ ...value, notes: e.target.value })} placeholder="拍摄重点、规格或其他备注" /></Field><div className="form-actions"><button type="button" className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" type="submit">提交并通知飞书</button></div></form>; }
-function IdeaForm({ value, setValue, onSubmit, onCancel }: { value: typeof emptyIdea; setValue: React.Dispatch<React.SetStateAction<typeof emptyIdea>>; onSubmit: (e: React.FormEvent) => void; onCancel: () => void }) { return <form className="form-grid" onSubmit={onSubmit}><Field label="分类"><select value={value.category} onChange={(e) => setValue({ ...value, category: e.target.value as typeof value.category })}><option>文案</option><option>视频</option><option>用户故事</option><option>其他</option></select></Field><Field label="日期"><input type="date" value={value.date} onChange={(e) => setValue({ ...value, date: e.target.value })} /></Field><Field label="记录人" wide><input value={value.recorder} onChange={(e) => setValue({ ...value, recorder: e.target.value })} placeholder="姓名（选填）" /></Field><Field label="日区文案" wide><textarea value={value.copy} onChange={(e) => setValue({ ...value, copy: e.target.value })} placeholder="记录原始文案或表达方向（选填）" /></Field><Field label="参考视频链接" wide><input type="url" value={value.referenceLink} onChange={(e) => setValue({ ...value, referenceLink: e.target.value })} placeholder="https://...（选填）" /></Field><Field label="用户与手机壳的故事" wide><textarea value={value.story} onChange={(e) => setValue({ ...value, story: e.target.value })} placeholder="记录具体的人、场景和情绪（选填）" /></Field><div className="form-actions"><button type="button" className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" type="submit">保存灵感</button></div></form>; }
+function IdeaForm({ value, setValue, onSubmit, onCancel }: { value: typeof emptyIdea; setValue: React.Dispatch<React.SetStateAction<typeof emptyIdea>>; onSubmit: (e: React.FormEvent) => void; onCancel: () => void }) { return <form className="form-grid" onSubmit={onSubmit}><Field label="分类"><select value={value.category} onChange={(e) => setValue({ ...value, category: e.target.value as typeof value.category })}><option>文案</option><option>视频</option><option>用户故事</option><option>其他</option></select></Field><Field label="日期"><input type="date" value={value.date} onChange={(e) => setValue({ ...value, date: e.target.value })} /></Field><Field label="记录人" wide><input value={value.recorder} onChange={(e) => setValue({ ...value, recorder: e.target.value })} placeholder="姓名（选填）" /></Field><Field label="日区文案" wide><textarea value={value.copy} onChange={(e) => setValue({ ...value, copy: e.target.value })} placeholder="记录原始文案或表达方向（选填）" /></Field><Field label="参考视频链接" wide><input type="url" value={value.referenceLink} onChange={(e) => setValue({ ...value, referenceLink: e.target.value })} placeholder="https://...（选填）" /></Field><Field label="参考图片" wide><input type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; if (file.size > 4 * 1024 * 1024) { window.alert("图片不能超过 4MB"); e.currentTarget.value = ""; return; } const reader = new FileReader(); reader.onload = () => setValue({ ...value, image: String(reader.result || "") }); reader.readAsDataURL(file); }} /></Field>{value.image && <div className="image-preview"><img src={value.image} alt="已选择的参考图片" /><button type="button" className="secondary-button" onClick={() => setValue({ ...value, image: "" })}>移除图片</button></div>}<Field label="用户与手机壳的故事" wide><textarea value={value.story} onChange={(e) => setValue({ ...value, story: e.target.value })} placeholder="记录具体的人、场景和情绪（选填）" /></Field><div className="form-actions"><button type="button" className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" type="submit">保存灵感</button></div></form>; }
 function Empty({ disabled = false, icon, title, text, action, onAction }: { disabled?: boolean; icon: string; title: string; text: string; action: string; onAction: () => void }) { return <div className="empty-state"><i>{icon}</i><h3>{title}</h3><p>{text}</p><button disabled={disabled} className="secondary-button" onClick={onAction}>{action}</button></div>; }
 function Loading() { return <div className="loading-state"><span /><div><i /><i /><i /><i /></div><p>正在加载团队共享数据…</p></div>; }

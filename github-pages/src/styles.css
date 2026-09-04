@@ -334,3 +334,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: default; color: inh
 .capacity-z { position: absolute; top: 18px; right: 28px; z-index: 0; color: rgba(247, 79, 51, .12); font: 800 clamp(92px, 12vw, 168px)/.8 Arial, sans-serif; letter-spacing: -.12em; transform: rotate(-14deg); pointer-events: none; user-select: none; }
 .capacity-panel > *:not(.capacity-z) { position: relative; z-index: 1; }
 @media (max-width: 720px) { .capacity-z { top: 16px; right: 14px; font-size: 86px; } }
+.idea-image-wrap { display: grid; gap: 7px; }
+.idea-image { width: 100%; max-height: 220px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(60,53,41,.15); }
+.image-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.image-preview img { width: 110px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
